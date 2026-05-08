@@ -14,6 +14,7 @@
  * skipped instead of erroring.
  */
 
+import "./load-env";
 import { eq } from "drizzle-orm";
 import { createAuth } from "@internship/auth-config";
 import { db, tables } from "./index";
