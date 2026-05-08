@@ -99,7 +99,7 @@ meRoutes.post("/me/garage", async (c) => {
  */
 meRoutes.delete("/me/garage/:id", async (c) => {
   const id = c.req.param("id");
-  if (!isUuid(id)) {
+  if (!id || !isUuid(id)) {
     return fail(c, 404, "not_found", "Vehicle not found");
   }
   const userId = c.get("user").id;
@@ -200,7 +200,7 @@ meRoutes.post("/me/saved-parts", async (c) => {
  */
 meRoutes.delete("/me/saved-parts/:id", async (c) => {
   const id = c.req.param("id");
-  if (!isUuid(id)) {
+  if (!id || !isUuid(id)) {
     return fail(c, 404, "not_found", "Saved part not found");
   }
   const userId = c.get("user").id;

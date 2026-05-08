@@ -62,7 +62,7 @@ partsRoutes.get("/parts", async (c) => {
  */
 partsRoutes.get("/parts/:id", async (c) => {
   const id = c.req.param("id");
-  if (!UUID_PATTERN.test(id)) {
+  if (!id || !UUID_PATTERN.test(id)) {
     return fail(c, 404, "not_found", "Part not found");
   }
   const part = await db.query.parts.findFirst({ where: eq(tables.parts.id, id) });
@@ -125,7 +125,7 @@ partsRoutes.post("/parts", requireAuth, requireAdmin, async (c) => {
  */
 partsRoutes.patch("/parts/:id", requireAuth, requireAdmin, async (c) => {
   const id = c.req.param("id");
-  if (!UUID_PATTERN.test(id)) {
+  if (!id || !UUID_PATTERN.test(id)) {
     return fail(c, 404, "not_found", "Part not found");
   }
 
@@ -162,7 +162,7 @@ partsRoutes.patch("/parts/:id", requireAuth, requireAdmin, async (c) => {
  */
 partsRoutes.delete("/parts/:id", requireAuth, requireAdmin, async (c) => {
   const id = c.req.param("id");
-  if (!UUID_PATTERN.test(id)) {
+  if (!id || !UUID_PATTERN.test(id)) {
     return fail(c, 404, "not_found", "Part not found");
   }
 
