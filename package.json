@@ -1,0 +1,26 @@
+{
+  "name": "internship-project",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Bun monorepo: Better Auth server + protected resource API for an auto parts marketplace",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "auth:dev": "bun --filter @internship/auth-server dev",
+    "api:dev": "bun --filter @internship/api dev",
+    "db:generate": "bun --filter @internship/db db:generate",
+    "db:migrate": "bun --filter @internship/db db:migrate",
+    "db:seed": "bun --filter @internship/db db:seed",
+    "db:studio": "bun --filter @internship/db db:studio",
+    "typecheck": "bun --filter '*' typecheck"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "@types/bun": "^1.1.6"
+  },
+  "engines": {
+    "bun": ">=1.1.0"
+  }
+}
