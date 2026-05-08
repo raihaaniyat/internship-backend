@@ -1,0 +1,29 @@
+{
+  "name": "@internship/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/schema.ts",
+    "./client": "./src/client.ts"
+  },
+  "scripts": {
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "bun run src/migrate.ts",
+    "db:seed": "bun run src/seed.ts",
+    "db:studio": "drizzle-kit studio",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.33.0",
+    "postgres": "^3.4.4"
+  },
+  "devDependencies": {
+    "@internship/auth-config": "workspace:*",
+    "drizzle-kit": "^0.24.2",
+    "typescript": "^5.5.4",
+    "@types/bun": "^1.1.6"
+  }
+}
