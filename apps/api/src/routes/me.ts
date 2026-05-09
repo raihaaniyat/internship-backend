@@ -169,7 +169,7 @@ meRoutes.post("/me/saved-parts", async (c) => {
     columns: { id: true },
   });
   if (existing) {
-    return fail(c, 400, "conflict", "Part is already saved");
+    return fail(c, 409, "conflict", "Part is already saved");
   }
 
   const [created] = await db

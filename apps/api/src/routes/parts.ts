@@ -90,7 +90,7 @@ partsRoutes.post("/parts", requireAuth, requireAdmin, async (c) => {
     columns: { id: true },
   });
   if (existing) {
-    return fail(c, 400, "conflict", "A part with that partNumber already exists");
+    return fail(c, 409, "conflict", "A part with that partNumber already exists");
   }
 
   const [created] = await db
