@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "bun --hot run src/index.ts",
     "start": "bun run src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "test:integration": "bun test src/__tests__/integration.test.ts"
   },
   "dependencies": {
     "@internship/auth-config": "workspace:*",
