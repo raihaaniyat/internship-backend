@@ -170,22 +170,25 @@ deliverable is to discover and document the actual paths, not assume them:
 # 1. Install dependencies
 bun install
 
-# 2. Configure env
+# 2. Wire up the repo's commit-msg hook (one-time, per clone)
+git config core.hooksPath .githooks
+
+# 3. Configure env
 cp .env.example .env
 # Then edit BETTER_AUTH_SECRET to something long and random:
 #   openssl rand -base64 32
 
-# 3. Start Postgres
+# 4. Start Postgres
 docker compose -f docker-compose.development.yml up -d
 
-# 4. Generate + apply migrations
+# 5. Generate + apply migrations
 bun run db:generate
 bun run db:migrate
 
-# 5. Seed users + parts
+# 6. Seed users + parts
 bun run db:seed
 
-# 6. Start the servers (two terminals)
+# 7. Start the servers (two terminals)
 bun run auth:dev   # http://localhost:3001
 bun run api:dev    # http://localhost:3000
 ```
