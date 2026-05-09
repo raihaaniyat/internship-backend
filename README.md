@@ -28,8 +28,7 @@ A **Bun** monorepo for an internship-style assignment: **Better Auth** on **`app
 14. [Manual checks (curl)](#manual-checks-curl)
 15. [Reviewer demo (5–7 minutes)](#reviewer-demo-5--7-minutes)
 16. [Troubleshooting](#troubleshooting)
-17. [Intentionally out of scope](#intentionally-out-of-scope)
-18. [Author](#author)
+17. [Author](#author)
 
 ---
 
@@ -730,15 +729,6 @@ Kill the old process or change the port in `apps/web` scripts **and** add the ne
 ### `part.price.toFixed is not a function`
 
 Fixed in the client by normalizing API `price` fields; if you bypass `apps/web/lib/api.ts`, coerce with `Number` / `parseFloat` yourself.
-
----
-
-## Intentionally out of scope
-
-- **No real email delivery** — `AUTH_REQUIRE_EMAIL_VERIFICATION` defaults off for local testing.
-- **No refresh-token product story** — session lifetime + Better Auth `updateAge` suffices for the assignment; production may want stricter policies.
-- **CORS** — Never use `*` with credentials in production; list real origins.
-- **Admin promotion** — Seeding an admin is for **dev/demo only**; production should use a controlled process.
 
 ---
 
