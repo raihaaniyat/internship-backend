@@ -1,0 +1,172 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Clean white base with a hint of mint — BuyAnyAutoPart-style green theme */
+    --background: 150 40% 99%;
+    --foreground: 222 47% 11%;
+    --muted: 150 18% 93%;
+    --muted-foreground: 220 9% 38%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --border: 150 16% 88%;
+    --input: 150 16% 88%;
+    /* Primary — emerald brand green */
+    --primary: 160 84% 39%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 150 24% 94%;
+    --secondary-foreground: 222 47% 11%;
+    /* Deeper green for secondary highlights / icons on light UI */
+    --accent: 161 72% 30%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 160 84% 36%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 48%;
+    --warning-foreground: 222 47% 11%;
+    --ring: 160 84% 39%;
+  }
+
+  .dark {
+    --background: 220 20% 8%;
+    --foreground: 150 20% 96%;
+    --muted: 220 16% 14%;
+    --muted-foreground: 220 9% 62%;
+    --popover: 220 20% 9%;
+    --popover-foreground: 150 20% 96%;
+    --card: 220 18% 11%;
+    --card-foreground: 150 20% 96%;
+    --border: 220 14% 18%;
+    --input: 220 14% 18%;
+    --primary: 158 72% 45%;
+    --primary-foreground: 220 24% 8%;
+    --secondary: 220 14% 16%;
+    --secondary-foreground: 150 20% 96%;
+    --accent: 161 55% 42%;
+    --accent-foreground: 220 24% 8%;
+    --destructive: 0 62% 48%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 158 64% 40%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 222 47% 11%;
+    --ring: 158 72% 45%;
+  }
+}
+
+* {
+  @apply border-border;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+html,
+body {
+  @apply bg-background text-foreground antialiased;
+  font-feature-settings: "rlig" 1, "calt" 1;
+}
+
+body {
+  min-height: 100vh;
+  overflow-x: hidden;
+  background-color: hsl(var(--background));
+  background-image:
+    radial-gradient(ellipse 110% 70% at 85% -15%, hsl(var(--primary) / 0.11), transparent 52%),
+    radial-gradient(ellipse 90% 55% at 0% 100%, hsl(160 70% 45% / 0.08), transparent 48%),
+    linear-gradient(180deg, hsl(var(--background)) 0%, hsl(150 35% 97%) 100%);
+}
+
+.dark body {
+  background-image:
+    radial-gradient(ellipse 110% 70% at 85% -15%, hsl(var(--primary) / 0.1), transparent 52%),
+    radial-gradient(ellipse 90% 55% at 0% 100%, hsl(var(--primary) / 0.06), transparent 48%),
+    linear-gradient(180deg, hsl(var(--background)) 0%, hsl(220 20% 6%) 100%);
+}
+
+.gradient-text {
+  background: linear-gradient(
+    105deg,
+    hsl(var(--primary)) 0%,
+    hsl(158 72% 42%) 48%,
+    hsl(172 55% 36%) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Hero panels — soft emerald wash like the reference landing */
+.hero-panel {
+  border-radius: 1.75rem;
+  background: linear-gradient(
+    100deg,
+    hsl(150 45% 96% / 0.92) 0%,
+    hsl(0 0% 100% / 0.98) 55%,
+    hsl(0 0% 100%) 100%
+  );
+  border: 1px solid hsl(var(--primary) / 0.12);
+  box-shadow:
+    0 1px 2px hsl(160 50% 20% / 0.04),
+    0 24px 48px -20px hsl(var(--primary) / 0.14);
+}
+
+.dark .hero-panel {
+  background: linear-gradient(
+    100deg,
+    hsl(var(--card) / 0.95) 0%,
+    hsl(220 18% 11%) 100%
+  );
+  border-color: hsl(var(--primary) / 0.2);
+  box-shadow: 0 24px 48px -20px hsl(0 0% 0% / 0.35);
+}
+
+.live-dot {
+  position: relative;
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background-color: hsl(var(--success));
+}
+.live-dot::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 9999px;
+  background-color: hsl(var(--success) / 0.35);
+  animation: ping 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+.live-dot.warn {
+  background-color: hsl(var(--warning));
+}
+.live-dot.warn::after {
+  background-color: hsl(var(--warning) / 0.35);
+}
+.live-dot.bad {
+  background-color: hsl(var(--destructive));
+}
+.live-dot.bad::after {
+  background-color: hsl(var(--destructive) / 0.35);
+  animation: none;
+}
+
+@keyframes ping {
+  75%,
+  100% {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+
+/* Prevent long URLs / code from blowing layout */
+.prose-tight {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
