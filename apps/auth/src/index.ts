@@ -23,8 +23,12 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { createAuth } from "@internship/auth-config";
+import { readAuthEnv } from "./env";
+import { securityHeaders } from "./middleware/securityHeaders";
+import { createAuthRateLimiter } from "./middleware/rateLimit";
 
 const auth = createAuth();
+const config = readAuthEnv();
 
 const app = new Hono();
 
@@ -33,15 +37,10 @@ app.use("*", logger());
 // CORS: explicit origins, never `*` in production. We expose `set-auth-token`
 // because the bearer plugin returns the bearer token in that header on
 // successful sign-in, and the browser cannot read it otherwise.
-const corsOrigins = (process.env.BETTER_AUTH_TRUSTED_ORIGINS ?? "")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
-
 app.use(
   "*",
   cors({
-    origin: corsOrigins.length > 0 ? corsOrigins : ["http://localhost:3000", "http://localhost:3001"],
+    origin: config.trustedOrigins,
     allowHeaders: ["Content-Type", "Authorization"],
     allowMethods: ["GET", "POST", "OPTIONS"],
     exposeHeaders: ["set-auth-token"],
@@ -49,6 +48,8 @@ app.use(
     maxAge: 600,
   }),
 );
+app.use("*", securityHeaders);
+app.use("/api/auth/*", createAuthRateLimiter(config.rateLimitAuthPerMin, config.rateLimitWindowMs));
 
 app.get("/health", (c) =>
   c.json({
@@ -61,7 +62,7 @@ app.get("/health", (c) =>
 // handler; Better Auth's handler matches that signature exactly.
 app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
 
-const port = Number(process.env.AUTH_PORT ?? 3001);
+const port = config.port;
 
 console.log(`[auth] listening on http://localhost:${port}`);
 console.log(`[auth] better-auth routes mounted at /api/auth/*`);
