@@ -2,6 +2,8 @@ node_modules/
 dist/
 build/
 .turbo/
+.next/
+out/
 
 # bun.lock (text format, bun >= 1.2) is committed for reproducible installs.
 # bun.lockb (legacy binary format) is no longer produced.
