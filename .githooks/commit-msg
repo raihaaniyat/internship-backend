@@ -4,14 +4,13 @@
 
 msg_file="$1"
 
-# Debug dump (temporary)
-cp "$msg_file" /tmp/commit-msg-debug.txt 2>/dev/null || cp "$msg_file" "$msg_file.dbg"
+PATTERN='^Co-authored-by:[[:space:]]*Cursor([[:space:]]|<)|^Co-authored-by:.*cursoragent@cursor\.com'
 
-if grep -E -i "^Co-authored-by:[[:space:]]*Cursor([[:space:]]|<)|^Co-authored-by:.*cursoragent@cursor\.com" "$msg_file" >/dev/null 2>&1; then
+if grep -E -i "$PATTERN" "$msg_file" >/dev/null 2>&1; then
   echo "commit-msg hook: refused to commit." >&2
-  echo "  Reason: message contains a Cursor / agent co-author trailer." >&2
+  echo "  Reason: message contains an automated agent co-author trailer." >&2
   echo "  Offending lines:" >&2
-  grep -E -i -n "^Co-authored-by:[[:space:]]*Cursor([[:space:]]|<)|^Co-authored-by:.*cursoragent@cursor\.com" "$msg_file" >&2
+  grep -E -i -n "$PATTERN" "$msg_file" >&2
   echo "  Strip it from your commit message and try again." >&2
   exit 1
 fi
