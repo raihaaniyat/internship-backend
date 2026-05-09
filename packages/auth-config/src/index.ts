@@ -38,6 +38,13 @@ export interface CreateAuthOptions {
   trustedOrigins?: string[];
   /** Long random string. MUST match across apps/auth and apps/api. */
   secret?: string;
+  /** Require email verification before login. */
+  requireEmailVerification?: boolean;
+}
+
+function readBoolean(value: string | undefined, fallback: boolean): boolean {
+  if (!value) return fallback;
+  return value.toLowerCase() === "true";
 }
 
 function readEnv(): Required<CreateAuthOptions> {
@@ -55,11 +62,15 @@ function readEnv(): Required<CreateAuthOptions> {
     .map((s) => s.trim())
     .filter(Boolean);
 
-  return { secret, baseURL, trustedOrigins };
+  const requireEmailVerification = readBoolean(process.env.AUTH_REQUIRE_EMAIL_VERIFICATION, false);
+
+  return { secret, baseURL, trustedOrigins, requireEmailVerification };
 }
 
 export function createAuth(options: CreateAuthOptions = {}) {
   const env = readEnv();
+  const requireEmailVerification =
+    options.requireEmailVerification ?? env.requireEmailVerification;
 
   return betterAuth({
     appName: "internship-project",
@@ -82,16 +93,14 @@ export function createAuth(options: CreateAuthOptions = {}) {
       // 8 chars is the assignment-grade minimum; production should be higher.
       minPasswordLength: 8,
       maxPasswordLength: 128,
-      // We don't run an SMTP server in this assignment, so we don't gate
-      // sign-in on email verification. Production should flip this on.
-      requireEmailVerification: false,
+      requireEmailVerification,
       autoSignIn: true,
     },
 
     session: {
-      // 7 day rolling sessions; refreshed on use.
-      expiresIn: 60 * 60 * 24 * 7,
-      updateAge: 60 * 60 * 24,
+      // Tunable policy with secure defaults for assignment demos.
+      expiresIn: Number(process.env.AUTH_SESSION_EXPIRES_IN_SECONDS ?? 60 * 60 * 24 * 7),
+      updateAge: Number(process.env.AUTH_SESSION_UPDATE_AGE_SECONDS ?? 60 * 60 * 24),
     },
 
     plugins: [
