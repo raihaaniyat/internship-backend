@@ -1,316 +1,751 @@
-# internship-project
+# BuyAnyAutoPart · Internship backend (monorepo)
 
-A Bun monorepo containing two services for an auto parts marketplace:
+A **Bun** monorepo for an internship-style assignment: **Better Auth** on **`apps/auth`**, a **Hono + Drizzle** resource API on **`apps/api`**, and an optional **Next.js** demo UI on **`apps/web`**. Everything shares **one PostgreSQL database** and **`packages/auth-config`** so the API validates bearer tokens without duplicating auth logic.
 
-- `apps/auth` issues sessions (Better Auth, email + password, bearer tokens)
-- `apps/api` serves the protected catalog and per-user resources, validating
-  tokens against the same database
+---
 
-Both apps share schema, types, and the Better Auth instance through workspace
-packages, so token verification in `apps/api` does not duplicate any logic
-from `apps/auth`.
+## Table of contents
+
+1. [What’s implemented](#whats-implemented-assignment-alignment)
+2. [Architecture](#architecture)
+   - [System context](#system-context-mermaid)
+   - [Repository tree](#repository-structure-mermaid)
+3. [Repository layout](#repository-layout)
+4. [Prerequisites](#prerequisites)
+5. [Quick start](#quick-start)
+6. [Command reference](#command-reference)
+7. [Environment variables](#environment-variables)
+8. [Running services](#running-services)
+9. [Database (migrations, seed, Drizzle Studio, pgAdmin)](#database-migrations-seed-drizzle-studio-pgadmin)
+10. [Auth flow & token verification](#auth-flow--token-verification)
+   - [Sign-in and protected API](#sign-in-and-protected-api-mermaid)
+   - [requireAuth decision](#requireauth-decision-mermaid)
+   - [Admin gate](#admin-route-gate-mermaid)
+11. [API reference](#api-reference)
+12. [Web app (`apps/web`)](#web-app-appsweb)
+13. [Testing](#testing)
+    - [Integration test harness](#integration-test-harness-mermaid)
+14. [Manual checks (curl)](#manual-checks-curl)
+15. [Reviewer demo (5–7 minutes)](#reviewer-demo-5--7-minutes)
+16. [Troubleshooting](#troubleshooting)
+17. [Intentionally out of scope](#intentionally-out-of-scope)
+18. [Author](#author)
+
+---
+
+## What’s implemented (assignment alignment)
+
+| Requirement | Where / how |
+|-------------|-------------|
+| **Better Auth** with chosen methods | `packages/auth-config` — `emailAndPassword`, **bearer** plugin (session token as `Authorization: Bearer`), **admin** plugin (`role` on `user`). |
+| **Tokens minted for the API** | DB-backed sessions; sign-in returns **`set-auth-token`** header; same `DATABASE_URL` + `BETTER_AUTH_SECRET` on auth and API. |
+| **Auth HTTP routes** | `apps/auth` mounts Better Auth at **`/api/auth/*`** (sign-up, sign-in, sign-out, get-session, etc.). |
+| **Resource endpoints** | `apps/api/src/routes/*` — `/parts`, `/me`, garage, saved parts, admin mutations; see [API reference](#api-reference). |
+| **Protect routes; reject missing / invalid / expired** | `apps/api/src/middleware/requireAuth.ts` → `missing_token`, `invalid_token`, `token_expired`. |
+| **Drizzle + Postgres** | `packages/db` — schema, migrations, `db.query` / `db.insert` in route handlers. |
+| **Hardening (extra)** | CORS allow-lists, security headers, rate limiting, audit logging, integration tests. |
+| **Demo UI (extra)** | `apps/web` — catalog, auth, `/status` diagnostics, emerald “BuyAnyAutoPart”-style theme. |
+
+---
 
 ## Architecture
 
+Diagrams use **[Mermaid](https://mermaid.js.org/)** — they render on GitHub/GitLab and in most Markdown previews (VS Code, Cursor, etc.).
+
+### System context (Mermaid)
+
+```mermaid
+flowchart TB
+  subgraph Client["Client"]
+    BR[Browser]
+  end
+
+  subgraph Services["Runtime services"]
+    WEB["apps/web :3002 · Next.js"]
+    AUTH["apps/auth :3001 · Hono + Better Auth"]
+    API["apps/api :3000 · Hono + Drizzle"]
+  end
+
+  subgraph Shared["Shared packages"]
+    CFG["packages/auth-config · createAuth()"]
+    DBLIB["packages/db · Drizzle schema + client"]
+  end
+
+  PG[("PostgreSQL 16 · user, session, account, verification, parts, …")]
+
+  BR --> WEB
+  BR --> AUTH
+  BR --> API
+  WEB --> AUTH
+  WEB --> API
+
+  AUTH --> CFG
+  AUTH --> DBLIB
+  API --> CFG
+  API --> DBLIB
+  DBLIB --> PG
 ```
-            +-------------------+              +--------------------+
-  client -->| apps/auth :3001   |  sign-up /   | apps/api :3000     |<-- client
-            | Hono + Better Auth|  sign-in     | Hono + Drizzle     |
-            +---------+---------+              +---------+----------+
-                      |                                  |
-                      |  reads/writes user, session,     |  reads session via
-                      |  account, verification           |  shared Better Auth
-                      v                                  v
-            +-----------------------------------------------+
-            |               PostgreSQL 16                   |
-            |  user / session / account / verification      |  (Better Auth)
-            |  parts / vehicles / saved_parts / audit_logs  |  (domain)
-            +-----------------------------------------------+
-                      ^
-                      |
-                      |
-            +-------------------+        +--------------------+
-            | packages/db       |<------>| packages/auth-config|
-            | Drizzle schema    |        | createAuth() factory|
-            | + client + seed   |        | (used by both apps) |
-            +-------------------+        +--------------------+
+
+### Repository structure (Mermaid)
+
+```mermaid
+flowchart LR
+  ROOT["internship-project"] --> APPS["apps/"]
+  ROOT --> PKGS["packages/"]
+  APPS --> APP_AUTH["auth/"]
+  APPS --> APP_API["api/"]
+  APPS --> APP_WEB["web/"]
+  PKGS --> PKG_DB["db/"]
+  PKGS --> PKG_AC["auth-config/"]
 ```
 
-Key design choices:
+**Design choices**
 
-- One PostgreSQL database, shared by both apps. Session validation in
-  `apps/api` is a database lookup (Better Auth uses DB-backed sessions, not
-  stateless JWTs), so it works without a network call to `apps/auth`.
-- One Drizzle schema in `packages/db` covers Better Auth's tables and the
-  domain tables. Foreign keys (`vehicles.user_id`, `saved_parts.user_id`,
-  `audit_logs.user_id`) point to Better Auth's `user.id`.
-- `packages/auth-config` owns the Better Auth configuration and is consumed
-  by both apps. The same `BETTER_AUTH_SECRET` and `DATABASE_URL` are read
-  on both sides, so a token issued by `apps/auth` is valid in `apps/api`.
+- **One database** — Session validation in `apps/api` is a **database lookup** (not a stateless JWT verify against a secret alone). No extra HTTP hop to `apps/auth` at request time.
+- **One schema** — `packages/db/src/schema.ts`: Better Auth tables + domain tables; FKs from `vehicles`, `saved_parts`, `audit_logs` to `user.id`.
+- **Shared auth factory** — `packages/auth-config` is imported by both servers so configuration cannot drift.
 
-## Auth flow end to end
+---
 
-1. Client POSTs to `apps/auth` at `POST /api/auth/sign-up/email` with
-   `{ name, email, password }`. Better Auth hashes the password, writes the
-   `user` and `account` rows, and starts a session.
-2. Client POSTs to `apps/auth` at `POST /api/auth/sign-in/email` with
-   `{ email, password }`. Better Auth verifies, writes a fresh `session`
-   row, and returns the bearer token in a response header named
-   `set-auth-token`. The token is also returned in the JSON body's session
-   metadata.
-3. Client stores the token (Authorization header on every API call,
-   localStorage if you must, never URL params).
-4. Client calls `apps/api` with `Authorization: Bearer <token>`.
-5. `apps/api`'s `requireAuth` middleware calls
-   `auth.api.getSession({ headers })` from the shared Better Auth instance.
-   The bearer plugin reads the token, looks up the session row, checks
-   `expires_at`, and returns `{ user, session }` or `null`.
-6. On success, `requireAuth` attaches the user (with role) and session to
-   the Hono context. Downstream handlers read `c.var.user.id` and use it
-   to scope every query.
+## Repository layout
 
-## Token verification in apps/api
+Text listing (see also the [repository Mermaid tree](#repository-structure-mermaid) above):
 
-`apps/api/src/middleware/requireAuth.ts` is the only place that turns a
-bearer token into a user. It returns one of four outcomes, each with a
-distinct `error` code in the response body:
+```
+internship-project/
+  apps/
+    auth/                 # Hono + Better Auth (:3001)
+    api/                  # Hono + requireAuth + Drizzle (:3000)
+    web/                  # Next.js 15 demo UI (:3002)
+  packages/
+    db/                   # Drizzle schema, migrate, seed, drizzle-kit
+    auth-config/          # betterAuth({ ... }) shared by auth + api
+  docker-compose.development.yml
+  .env.example
+  package.json            # Bun workspaces + root scripts
+```
 
-| Situation                                                | Status | error code      |
-| -------------------------------------------------------- | ------ | --------------- |
-| No `Authorization` header                                | 401    | `missing_token` |
-| Header present but not `Bearer <token>` shape            | 401    | `invalid_token` |
-| Bearer token shape ok, session not found                 | 401    | `invalid_token` |
-| Session found but `expires_at` already in the past       | 401    | `token_expired` |
-| Valid                                                    | 200    | (proceeds)      |
+---
 
-The middleware never includes DB errors, stack traces, or token contents
-in any response.
+## Prerequisites
 
-`requireAdmin` is a separate middleware that runs after `requireAuth` and
-only checks `c.var.user.role === "admin"`, returning 403 `forbidden`
-otherwise. The role lives on the Better Auth `user` table via the
-`admin` plugin, so we did not need a separate `user_profiles` table.
+- **Bun** `>= 1.1` (see [bun.sh](https://bun.sh))
+- **Docker** (for PostgreSQL via Compose)
+- **Node.js** (used by `apps/web` scripts to run the Next.js CLI reliably on all platforms)
 
-## Database tables
+---
 
-### Owned by Better Auth
+## Quick start
 
-| Table          | Purpose                                                                |
-| -------------- | ---------------------------------------------------------------------- |
-| `user`         | Identity. Has `role` ("user" or "admin") via the admin plugin.         |
-| `session`      | One row per active login. `token` is the bearer value. Has `expires_at`.|
-| `account`      | Provider link table. For email+password, holds the password hash.      |
-| `verification` | Used by Better Auth for email verify, password reset tokens, etc.      |
+```bash
+# 1. Dependencies
+bun install
 
-### Domain tables
+# 2. Env (repo root)
+cp .env.example .env
+# Set BETTER_AUTH_SECRET to a long random value, e.g.:
+#   openssl rand -base64 32
 
-| Table         | Purpose                                                                  |
-| ------------- | ------------------------------------------------------------------------ |
-| `parts`       | Catalog. Public read, admin write.                                       |
-| `vehicles`    | A user's saved garage (`user_id` FK to `user.id`).                       |
-| `saved_parts` | A user's bookmarks. Unique on `(user_id, part_id)` so no duplicates.     |
-| `audit_logs`  | Append-only record of mutating actions. `metadata` is jsonb.             |
+# 3. Postgres
+docker compose -f docker-compose.development.yml up -d
 
-All schema lives in `packages/db/src/schema.ts`. All migrations are
-generated by `drizzle-kit` and live in `packages/db/drizzle/`.
+# 4. Schema
+bun run db:generate   # when you change schema; optional on fresh clone if migrations exist
+bun run db:migrate
+bun run db:seed
+
+# 5. Three terminals — auth, API, web (see [Command reference](#command-reference))
+bun run auth:dev      # http://localhost:3001
+bun run api:dev       # http://localhost:3000
+bun run web:dev       # http://localhost:3002
+```
+
+Full copy-paste tables (Docker, Bun, `npx` for **:3002**) are in **[Command reference](#command-reference)** below.
+
+Optional (one-time hook):
+
+```bash
+git config core.hooksPath .githooks
+```
+
+---
+
+## Command reference
+
+Use this section as the single **uniform** list of commands. Unless noted, run **Bun** from the **repository root** (`internship-backend/`).
+
+### Docker Compose (PostgreSQL)
+
+| Action | Command |
+|--------|---------|
+| Start database (detached) | `docker compose -f docker-compose.development.yml up -d` |
+| Stop containers | `docker compose -f docker-compose.development.yml down` |
+| View logs (follow) | `docker compose -f docker-compose.development.yml logs -f` |
+
+### Bun (monorepo root)
+
+| Action | Command |
+|--------|---------|
+| Install dependencies | `bun install` |
+| Auth server → `http://localhost:3001` | `bun run auth:dev` |
+| API server → `http://localhost:3000` | `bun run api:dev` |
+| Web UI → `http://localhost:3002` | `bun run web:dev` |
+| Generate Drizzle migrations | `bun run db:generate` |
+| Apply migrations | `bun run db:migrate` |
+| Seed database | `bun run db:seed` |
+| Drizzle Studio | `bun run db:studio` |
+| Typecheck all workspaces | `bun run typecheck` |
+| API tests (integration suite) | `bun run test` |
+| API integration tests only | `bun run test:integration` |
+| Clear Next.js build cache | `bun run --filter @internship/web clean` |
+
+### Next.js on `http://localhost:3002` (`npx`)
+
+The `bun run web:dev` script runs **`node …/next dev -p 3002 --turbopack`**. Equivalent **`npx`** invocations from **`apps/web`**:
+
+```bash
+cd apps/web
+npx next dev -p 3002 --turbopack
+```
+
+Webpack dev (fallback):
+
+```bash
+cd apps/web
+npx next dev -p 3002
+```
+
+**Windows (PowerShell)** if `npx` does not resolve:
+
+```powershell
+cd apps/web
+./node_modules/.bin/next dev -p 3002 --turbopack
+```
+
+Or:
+
+```powershell
+cd apps/web
+npx.cmd next dev -p 3002 --turbopack
+```
+
+Production build and serve on port 3002:
+
+```bash
+cd apps/web
+npx next build
+npx next start -p 3002
+```
+
+---
+
+## Environment variables
+
+Copy **`.env.example`** → **`.env`** at the **repository root**. Both `apps/auth` and `apps/api` load this via `packages/db/src/load-env.ts` and app `env` readers.
+
+**Important**
+
+- **`BETTER_AUTH_SECRET`** — Must be **identical** for `apps/auth` and `apps/api` (and ≥ 16 chars as enforced in auth-config).
+- **`BETTER_AUTH_TRUSTED_ORIGINS`** and **`API_CORS_ORIGINS`** — Include **both** `http://localhost:3002` and `http://127.0.0.1:3002` (and the same for `:3000`/`:3001`) so the browser Origin matches how you open the site.
+
+Illustrative excerpt from `.env.example`:
+
+```env
+DATABASE_URL=postgres://internship:internship_dev_password@localhost:5432/internship
+BETTER_AUTH_SECRET=replace_me_with_a_long_random_string_at_least_32_chars
+BETTER_AUTH_URL=http://localhost:3001
+BETTER_AUTH_TRUSTED_ORIGINS=http://localhost:3000,http://localhost:3001,http://localhost:3002,http://127.0.0.1:3000,http://127.0.0.1:3001,http://127.0.0.1:3002
+API_CORS_ORIGINS=http://localhost:3000,http://localhost:3001,http://localhost:3002,http://127.0.0.1:3000,http://127.0.0.1:3001,http://127.0.0.1:3002
+AUTH_PORT=3001
+API_PORT=3000
+```
+
+**Web overrides** (`apps/web/.env.local` optional) — must use the **same host** as the address bar:
+
+```env
+# apps/web/.env.example
+# NEXT_PUBLIC_AUTH_BASE_URL=http://localhost:3001
+# NEXT_PUBLIC_API_BASE_URL=http://localhost:3000
+```
+
+---
+
+## Running services
+
+Root **`package.json`** scripts (Bun workspaces):
+
+```json
+{
+  "scripts": {
+    "auth:dev": "bun --filter @internship/auth-server dev",
+    "api:dev": "bun --filter @internship/api dev",
+    "web:dev": "bun --filter @internship/web dev",
+    "db:generate": "bun --filter @internship/db db:generate",
+    "db:migrate": "bun --filter @internship/db db:migrate",
+    "db:seed": "bun --filter @internship/db db:seed",
+    "db:studio": "bun --filter @internship/db db:studio",
+    "typecheck": "bun --filter '*' typecheck",
+    "test": "bun --filter @internship/api test",
+    "test:integration": "bun --filter @internship/api test:integration"
+  }
+}
+```
+
+| Script | Purpose |
+|--------|---------|
+| `auth:dev` | Better Auth server |
+| `api:dev` | Resource API |
+| `web:dev` | Next.js UI (Turbopack dev) |
+| `db:migrate` / `db:seed` | Apply migrations and seed users + parts |
+| `db:studio` | Drizzle Studio (see below) |
+| `test` | API **integration** tests (starts auth+api in-process) |
+| `test:integration` | Same file, explicit filter |
+
+---
+
+## Database (migrations, seed, Drizzle Studio, pgAdmin)
+
+- **Schema** — `packages/db/src/schema.ts`
+- **Migrations** — `packages/db/drizzle/`
+- **Migrate** — `bun run db:migrate` (uses `DATABASE_URL`)
+- **Seed** — `bun run db:seed` (Better Auth users + catalog; see [Test credentials](#test-credentials-after-seed))
+
+### Drizzle Studio
+
+Not a folder in the repo — it is launched from **`packages/db`**:
+
+```bash
+bun run db:studio
+```
+
+Uses `packages/db/drizzle.config.ts` (loads root `.env` via `src/load-env.ts`). The CLI prints a URL (often `https://local.drizzle.studio`) — open it in the browser to inspect tables.
+
+### pgAdmin (optional)
+
+Useful for **live demos** and SQL. Connection (from Compose / `.env.example`):
+
+| Field | Value |
+|-------|--------|
+| Host | `localhost` |
+| Port | `5432` |
+| Database | `internship` |
+| Username | `internship` |
+| Password | `internship_dev_password` |
+
+**Tables to show**
+
+- Better Auth: `user`, `session`, `account`, `verification`
+- Domain: `parts`, `vehicles`, `saved_parts`, `audit_logs`
+
+---
+
+## Auth flow & token verification
+
+### Sign-in and protected API (Mermaid)
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor U as Browser
+  participant W as apps/web :3002
+  participant A as apps/auth :3001
+  participant P as apps/api :3000
+  participant D as PostgreSQL
+
+  Note over U,D: Optional: UI loads from Next.js; auth/API still work with curl.
+
+  U->>A: POST /api/auth/sign-in/email JSON credentials
+  A->>D: Verify password, write session row
+  D-->>A: Session persisted
+  A-->>U: 200 + set-auth-token header (bearer value)
+
+  U->>P: GET /me + Authorization Bearer token
+  P->>D: getSession / session lookup via shared Better Auth
+  D-->>P: user + session if valid
+  P-->>U: 200 profile JSON
+```
+
+### requireAuth decision (Mermaid)
+
+```mermaid
+flowchart TD
+  START([Incoming request]) --> M{Protected route?}
+  M -->|no| NEXT[Handler / public middleware chain]
+  M -->|yes| H{Authorization<br/>header present?}
+  H -->|no| E1[401 · missing_token]
+  H -->|yes| F{Bearer token format}
+  F -->|bad| E2[401 · invalid_token]
+  F -->|ok| S[getSession + optional session row lookup]
+  S --> V{Session valid and<br/>not expired?}
+  V -->|expired| E3[401 · token_expired]
+  V -->|missing / bad| E4[401 · invalid_token]
+  V -->|ok| OK[Set c.var.user + c.var.session → next]
+```
+
+### Admin route gate (Mermaid)
+
+```mermaid
+flowchart LR
+  subgraph chain["Middleware chain"]
+    R1[requireAuth]
+    R2[requireAdmin]
+    H[Admin handler]
+  end
+  R1 -->|403 never here if unauthenticated| R2
+  R2 -->|role === admin| H
+  R2 -->|else| X[403 · forbidden]
+```
+
+### End-to-end flow (steps)
+
+1. `POST /api/auth/sign-up/email` on **:3001** with `{ name, email, password }`.
+2. `POST /api/auth/sign-in/email` — response header **`set-auth-token`** holds the bearer token (also reflected in JSON session metadata where applicable).
+3. Client calls **:3000** with `Authorization: Bearer <token>`.
+4. `requireAuth` uses **`auth.api.getSession({ headers })`** from `@internship/auth-config`; bearer plugin resolves the session row.
+5. Handlers use **`c.var.user.id`** (and `role` for admin routes).
+
+### Shared Better Auth configuration (excerpt)
+
+From `packages/auth-config/src/index.ts`:
+
+```ts
+return betterAuth({
+  appName: "internship-project",
+  secret: options.secret ?? env.secret,
+  baseURL: options.baseURL ?? env.baseURL,
+  trustedOrigins: options.trustedOrigins ?? env.trustedOrigins,
+
+  database: drizzleAdapter(db, {
+    provider: "pg",
+    schema: {
+      user: schema.user,
+      session: schema.session,
+      account: schema.account,
+      verification: schema.verification,
+    },
+  }),
+
+  emailAndPassword: {
+    enabled: true,
+    minPasswordLength: 8,
+    maxPasswordLength: 128,
+    requireEmailVerification,
+    autoSignIn: true,
+  },
+
+  session: {
+    expiresIn: Number(process.env.AUTH_SESSION_EXPIRES_IN_SECONDS ?? 60 * 60 * 24 * 7),
+    updateAge: Number(process.env.AUTH_SESSION_UPDATE_AGE_SECONDS ?? 60 * 60 * 24),
+  },
+
+  plugins: [bearer(), admin()],
+});
+```
+
+### Auth server mount (`apps/auth`)
+
+```ts
+app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
+```
+
+Documented routes include:
+
+- `POST /api/auth/sign-up/email`
+- `POST /api/auth/sign-in/email`
+- `POST /api/auth/sign-out`
+- `GET /api/auth/get-session`
+
+### Token verification (`apps/api`)
+
+| Situation | Status | `error` |
+|-----------|--------|---------|
+| No `Authorization` | 401 | `missing_token` |
+| Not `Bearer <token>` | 401 | `invalid_token` |
+| Unknown session | 401 | `invalid_token` |
+| Session expired | 401 | `token_expired` |
+| OK | (next) | — |
+
+Excerpt from `apps/api/src/middleware/requireAuth.ts`:
+
+```ts
+export async function requireAuth(c: Context<AuthEnv>, next: Next) {
+  const headerValue = c.req.header("authorization") ?? c.req.header("Authorization");
+
+  if (!headerValue) {
+    return fail(c, 401, "missing_token", "Authorization header is required");
+  }
+
+  const match = BEARER_PATTERN.exec(headerValue);
+  if (!match) {
+    return fail(c, 401, "invalid_token", "Token is malformed");
+  }
+  // ... getSession, then optional DB lookup for expired vs invalid ...
+}
+```
+
+**Admin** — `requireAdmin` after `requireAuth`; **`403 forbidden`** if `role !== "admin"`.
+
+---
 
 ## API reference
 
 ### Public
 
-| Method | Path           | Auth | Body                                | Response                                                      |
-| ------ | -------------- | ---- | ----------------------------------- | ------------------------------------------------------------- |
-| GET    | `/health`      | none | -                                   | `{ data: { status, service }, meta }`                         |
-| GET    | `/parts`       | none | query: `page`, `pageSize`, `category` | `{ data: { items, page, pageSize, total }, meta }`          |
-| GET    | `/parts/:id`   | none | -                                   | `{ data: { ...part }, meta }` or `404 not_found`              |
+| Method | Path | Auth | Notes |
+|--------|------|------|--------|
+| GET | `/health` | none | |
+| GET | `/parts` | none | Query: `page`, `pageSize`, `category` |
+| GET | `/parts/:id` | none | UUID |
 
-### Authenticated user (Bearer required)
+### Authenticated (`Authorization: Bearer`)
 
-| Method | Path                       | Body                              | Response                                |
-| ------ | -------------------------- | --------------------------------- | --------------------------------------- |
-| GET    | `/me`                      | -                                 | `{ data: { id, email, name, role, ... }, meta }` |
-| GET    | `/me/garage`               | -                                 | `{ data: { items }, meta }`             |
-| POST   | `/me/garage`               | `{ make, model, year, trim? }`    | `201 { data: { ...vehicle }, meta }`    |
-| DELETE | `/me/garage/:id`           | -                                 | `{ data: { id }, meta }` or 404         |
-| GET    | `/me/saved-parts`          | -                                 | `{ data: { items: [{ bookmarkId, savedAt, part }] }, meta }` |
-| POST   | `/me/saved-parts`          | `{ partId }`                      | `201 { data: { ...savedPart }, meta }`  |
-| DELETE | `/me/saved-parts/:id`      | -                                 | `{ data: { id }, meta }` or 404         |
+| Method | Path | Notes |
+|--------|------|--------|
+| GET | `/me` | Profile |
+| GET/POST | `/me/garage` | Vehicles |
+| DELETE | `/me/garage/:id` | |
+| GET/POST | `/me/saved-parts` | Bookmarks |
+| DELETE | `/me/saved-parts/:id` | |
 
 ### Admin only
 
-| Method | Path           | Body                                               | Response                                |
-| ------ | -------------- | -------------------------------------------------- | --------------------------------------- |
-| POST   | `/parts`       | `{ name, partNumber, price, category, description?, inStock? }` | `201 { data: { ...part }, meta }` |
-| PATCH  | `/parts/:id`   | any subset of the create body                      | `{ data: { ...part }, meta }` or 404    |
-| DELETE | `/parts/:id`   | -                                                  | `{ data: { id }, meta }` or 404         |
+| Method | Path | Notes |
+|--------|------|--------|
+| POST | `/parts` | Create |
+| PATCH | `/parts/:id` | Update |
+| DELETE | `/parts/:id` | Delete |
 
-### Auth routes (mounted by Better Auth on apps/auth)
-
-These are mounted at `/api/auth/*` by Better Auth itself; the assignment
-deliverable is to discover and document the actual paths, not assume them:
-
-| Method | Path                          | Body                          |
-| ------ | ----------------------------- | ----------------------------- |
-| POST   | `/api/auth/sign-up/email`     | `{ name, email, password }`   |
-| POST   | `/api/auth/sign-in/email`     | `{ email, password }`         |
-| POST   | `/api/auth/sign-out`          | (Authorization required)      |
-| GET    | `/api/auth/get-session`       | (Authorization required)      |
-
-### Error response shape
+### Error shape
 
 ```json
-{ "error": "validation_error", "message": "Request body failed validation", "fields": { "price": "price must be a positive decimal with up to 2 dp" } }
+{
+  "error": "validation_error",
+  "message": "Request body failed validation",
+  "fields": { "price": "…" }
+}
 ```
 
-`fields` is only present for 400 validation errors.
+`fields` appears on **400** validation errors.
 
-## Local setup
+### API client: numeric `price` from Postgres
 
-```bash
-# 1. Install dependencies
-bun install
+PostgreSQL **`numeric`** values may serialize as **strings** in JSON. The web client normalizes `part.price` to a number in `apps/web/lib/api.ts` after successful responses (using `normalizePartPrice` in `apps/web/lib/utils.ts`) so UI code can safely use `.toFixed(2)`.
 
-# 2. Wire up the repo's commit-msg hook (one-time, per clone)
-git config core.hooksPath .githooks
+---
 
-# 3. Configure env
-cp .env.example .env
-# Then edit BETTER_AUTH_SECRET to something long and random:
-#   openssl rand -base64 32
+## Web app (`apps/web`)
 
-# 4. Start Postgres
-docker compose -f docker-compose.development.yml up -d
+- **Stack** — Next.js 15 (App Router), React 19, Tailwind, shadcn-style components, **Inter** font, emerald **BuyAnyAutoPart**-inspired theme.
+- **Ports** — `:3002` (Auth :3001 · API :3000).
+- **Scripts** (`apps/web/package.json`):
 
-# 5. Generate + apply migrations
-bun run db:generate
-bun run db:migrate
-
-# 6. Seed users + parts
-bun run db:seed
-
-# 7. Start the servers (two terminals)
-bun run auth:dev   # http://localhost:3001
-bun run api:dev    # http://localhost:3000
+```json
+{
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('.next',{recursive:true,force:true});\"",
+    "dev": "node ./node_modules/next/dist/bin/next dev -p 3002 --turbopack",
+    "dev:webpack": "node ./node_modules/next/dist/bin/next dev -p 3002",
+    "build": "node ./node_modules/next/dist/bin/next build",
+    "start": "node ./node_modules/next/dist/bin/next start -p 3002",
+    "typecheck": "tsc --noEmit"
+  }
+}
 ```
 
-### Test credentials (after seed)
+**Why Node for `next`?** The CLI is spawned with **Node** so dev/prod builds behave consistently on Windows; **Turbopack** is the default dev bundler (`dev:webpack` available if needed).
 
-| Role  | Email                          | Password    |
-| ----- | ------------------------------ | ----------- |
-| admin | `admin@buyanyautopart.com`     | `Admin1234!`|
-| user  | `user@buyanyautopart.com`      | `User1234!` |
+**Footer** — Build attribution and link to the author site appear in the root layout.
 
-Override in `.env` via `SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD`,
-`SEED_USER_EMAIL`, `SEED_USER_PASSWORD`.
+**Main routes** — `/`, `/sign-in`, `/sign-up`, `/parts`, `/me`, `/admin` (role-gated), `/status` (diagnostics).
 
-## Testing guide
+---
+
+## Testing
+
+### Integration test harness (Mermaid)
+
+```mermaid
+flowchart LR
+  subgraph bun["bun test"]
+    T[integration.test.ts]
+    AS[auth app fetch]
+    AP[api app fetch]
+  end
+  PG[(PostgreSQL)]
+  T --> AS
+  T --> AP
+  AS --> PG
+  AP --> PG
+```
+
+### Integration tests (`bun run test`)
+
+Prerequisites: **Postgres up** and **`bun run db:seed`** (tests sign in as seeded users).
+
+The suite imports the **auth** and **API** apps in-process and drives **`fetch()`** — you do **not** need separate terminals for `test`.
 
 ```bash
-# 1. Start infra
 docker compose -f docker-compose.development.yml up -d
-
-# 2. Run migrations
 bun run db:migrate
-
-# 3. Seed
 bun run db:seed
+bun run test
+```
 
-# 4. Start servers (two terminals)
-bun run auth:dev
-bun run api:dev
+**What `bun run test` proves** (see `apps/api/src/__tests__/integration.test.ts`):
 
-# 5. Sign up a fresh user
+| Test | Expectation |
+|------|-------------|
+| `GET /me` without token | **401** `missing_token` |
+| `GET /me` bogus bearer | **401** `invalid_token` |
+| `GET /me` as seeded user | **200** |
+| `POST /parts` as non-admin | **403** `forbidden` |
+| `POST /parts` duplicate `partNumber` | **409** `conflict` |
+
+```bash
+bun run test           # all API tests
+bun run test:integration   # integration file only
+```
+
+---
+
+## Manual checks (curl)
+
+Short cookbook (full flow). Replace tokens from `set-auth-token` after sign-in.
+
+```bash
+# Sign up
 curl -i -X POST http://localhost:3001/api/auth/sign-up/email \
   -H "Content-Type: application/json" \
-  -d '{"name": "Alice", "email": "alice@example.com", "password": "Alice1234!"}'
+  -d '{"name":"Alice","email":"alice@example.com","password":"Alice1234!"}'
 
-# 6. Sign in (capture the bearer token)
-#    The token is returned in the `set-auth-token` response HEADER.
-#    Use -i to see headers; copy the value of `set-auth-token`.
+# Sign in — copy set-auth-token from headers
 curl -i -X POST http://localhost:3001/api/auth/sign-in/email \
   -H "Content-Type: application/json" \
-  -d '{"email": "alice@example.com", "password": "Alice1234!"}'
+  -d '{"email":"alice@example.com","password":"Alice1234!"}'
 
-# Save it:
-TOKEN="paste-set-auth-token-value-here"
+TOKEN="paste-token-here"
 
-# 7. No token -> expect 401 missing_token
 curl -i http://localhost:3000/me
-
-# 8. Invalid token -> expect 401 invalid_token
 curl -i -H "Authorization: Bearer notarealtoken" http://localhost:3000/me
-
-# 9. Valid token -> expect 200
 curl -i -H "Authorization: Bearer $TOKEN" http://localhost:3000/me
+curl -i 'http://localhost:3000/parts?page=1&pageSize=20'
+```
 
-# 10. Sign in as the seeded admin
-curl -i -X POST http://localhost:3001/api/auth/sign-in/email \
-  -H "Content-Type: application/json" \
-  -d '{"email": "admin@buyanyautopart.com", "password": "Admin1234!"}'
-ADMIN_TOKEN="paste-set-auth-token-value-here"
+Admin create part (after signing in as seeded admin):
 
-# 11. Admin creates a part -> expect 201
+```bash
 curl -i -X POST http://localhost:3000/parts \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"name": "Oil Filter", "partNumber": "OF-9999", "price": 12.99, "category": "Engine", "inStock": true}'
-
-# 12. Non-admin tries to create a part -> expect 403 forbidden
-curl -i -X POST http://localhost:3000/parts \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Oil Filter", "partNumber": "OF-8888", "price": 12.99, "category": "Engine", "inStock": true}'
-
-# 13. List parts (public) -> expect 200
-curl -i 'http://localhost:3000/parts?page=1&pageSize=20'
-
-# 14. Add a vehicle to the user's garage
-curl -i -X POST http://localhost:3000/me/garage \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"make": "Honda", "model": "Civic", "year": 2018, "trim": "EX"}'
-
-# 15. Bookmark a part (use a partId from /parts)
-curl -i -X POST http://localhost:3000/me/saved-parts \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"partId": "PASTE_UUID_FROM_/parts"}'
+  -d '{"name":"Oil Filter","partNumber":"OF-9999","price":12.99,"category":"Engine","inStock":true}'
 ```
 
-## What is intentionally out of scope
+---
 
-These are flagged as known limitations, not bugs:
+### Test credentials (after seed)
 
-- No email delivery. `requireEmailVerification` is off so the assignment
-  is testable without an SMTP server. Production should turn it on and
-  wire up an email provider.
-- No refresh-token rotation. Better Auth's session lifetime + rolling
-  refresh handles the assignment cleanly; production may want shorter
-  access tokens plus rotation.
-- No rate limiting. A reverse proxy or `hono/rate-limiter` would do this
-  in production. The middleware seam is in place for it.
-- No automated test suite. The `curl` script in this README is the
-  testing surface for the assignment. A real project would add Vitest /
-  Bun test plus a test database.
-- CORS is configured for `http://localhost:3000` and `:3001` in dev. The
-  comments in both `apps/*/src/index.ts` flag the production rule:
-  origins must be explicit, never `*`, because `*` plus credentials lets
-  any site read responses on a victim's behalf.
-- Admin promotion in production should NOT be done by the seed script.
-  It should be a deliberate operator action (CLI command or a one-off
-  migration) gated by ops review.
+| Role | Email | Password |
+|------|-------|----------|
+| admin | `admin@buyanyautopart.com` | `Admin1234!` |
+| user | `user@buyanyautopart.com` | `User1234!` |
 
-## Layout
+Override via `SEED_*` in `.env`.
 
+### Hardening-related env (see `.env.example`)
+
+- `AUTH_REQUIRE_EMAIL_VERIFICATION`
+- `AUTH_SESSION_EXPIRES_IN_SECONDS` / `AUTH_SESSION_UPDATE_AGE_SECONDS`
+- `RATE_LIMIT_*` — public / auth / write buckets
+
+Both servers apply **strict CORS**, **security headers**, and **in-memory rate limiting** (`429 rate_limited`).
+
+---
+
+## Reviewer demo (5–7 minutes)
+
+**Terminal 1 — database**
+
+```powershell
+docker compose -f docker-compose.development.yml up -d
+bun run db:migrate
+bun run db:seed
 ```
-internship-project/
-  apps/
-    auth/            # Hono server hosting Better Auth
-    api/             # Hono server with requireAuth + requireAdmin
-  packages/
-    db/              # Drizzle schema + client + migrate + seed
-    auth-config/     # Shared Better Auth factory
-  docker-compose.development.yml
-  .env.example
-  package.json       # Bun workspaces
+
+**Terminal 2 — auth**
+
+```bash
+bun run auth:dev
 ```
+
+**Terminal 3 — API**
+
+```bash
+bun run api:dev
+```
+
+**Terminal 4 — web (`http://localhost:3002`)**
+
+```bash
+bun run web:dev
+```
+
+Alternative from `apps/web`: `npx next dev -p 3002 --turbopack` — see **[Command reference](#command-reference)**.
+
+**UI walkthrough**
+
+1. **Overview (`/`)** — System status / hero.
+2. **Catalog (`/parts`)** — `GET /parts`, filters.
+3. **Sign in (`/sign-in`)** — seeded admin; toast should confirm session.
+4. **My account (`/me`)** — garage + saved parts.
+5. **Admin (`/admin`)** — create/toggle/delete parts; repeat as normal user → **403** toast.
+6. **System (`/status`)** — live probes: 401 without token, invalid token, 200 with token, admin gate.
+7. **Automated proof** — `bun run test` shows **5** passing integration tests.
+
+---
+
+## Troubleshooting
+
+### “Failed to fetch” in the browser
+
+1. **Run** `auth:dev` and `api:dev` (and `web:dev` for the UI).
+2. **Origins** — `BETTER_AUTH_TRUSTED_ORIGINS` and `API_CORS_ORIGINS` must include the exact Origin you use (`localhost` vs `127.0.0.1`). Restart auth + API after editing `.env`.
+3. **CORP** — Dev uses **`cross-origin`** headers where configured so mixed localhost / 127.0.0.1 does not block `fetch`.
+
+### Next.js: `Cannot find module './NNN.js'` or missing `prerender-manifest.json`
+
+Usually a **corrupt or stale `.next` cache** (or multiple dev servers). **Stop** dev servers, then:
+
+```bash
+cd apps/web
+bun run clean
+bun run web:dev
+```
+
+Do not run two `next dev` instances on the same app folder.
+
+### Port already in use (`EADDRINUSE :3002`)
+
+Kill the old process or change the port in `apps/web` scripts **and** add the new web origin to CORS / trusted origins.
+
+### `part.price.toFixed is not a function`
+
+Fixed in the client by normalizing API `price` fields; if you bypass `apps/web/lib/api.ts`, coerce with `Number` / `parseFloat` yourself.
+
+---
+
+## Intentionally out of scope
+
+- **No real email delivery** — `AUTH_REQUIRE_EMAIL_VERIFICATION` defaults off for local testing.
+- **No refresh-token product story** — session lifetime + Better Auth `updateAge` suffices for the assignment; production may want stricter policies.
+- **CORS** — Never use `*` with credentials in production; list real origins.
+- **Admin promotion** — Seeding an admin is for **dev/demo only**; production should use a controlled process.
+
+---
+
+## Author
+
+**Muhammad Raihaan Musharraf** — [https://raihaaan.com](https://raihaaan.com)
+
+---
+
+*README revision: full-stack documentation with setup, snippets, tests, web tooling, and troubleshooting aligned to the current monorepo.*
