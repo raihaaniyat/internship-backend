@@ -49,7 +49,7 @@ A **Bun** monorepo for an internship-style assignment: **Better Auth** on **`app
 
 ## Architecture
 
-Diagrams use **[Mermaid](https://mermaid.js.org/)** — they render on GitHub/GitLab and in most Markdown previews (VS Code, Cursor, etc.).
+Diagrams use **[Mermaid](https://mermaid.js.org/)** — they render on GitHub/GitLab and in most Markdown previews (for example VS Code).
 
 ### System context (Mermaid)
 

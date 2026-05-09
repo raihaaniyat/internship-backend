@@ -3,8 +3,8 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CarFront } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { BrandLogo } from "@/components/brand-logo";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/components/ui/toast";
@@ -47,8 +47,8 @@ export function Header() {
           href="/"
           className="flex min-w-0 max-w-[calc(100%-4rem)] shrink-0 items-center gap-2.5 text-sm font-semibold sm:max-w-none"
         >
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-emerald-700 text-primary-foreground shadow-md shadow-primary/30">
-            <CarFront className="h-5 w-5" aria-hidden strokeWidth={2} />
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white shadow-md shadow-primary/20 ring-1 ring-primary/20">
+            <BrandLogo size={36} className="h-8 w-8" priority />
           </span>
           <span className="min-w-0 truncate font-bold tracking-tight text-primary sm:whitespace-normal">
             <span className="hidden sm:inline">BuyAnyAutoPart</span>

@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { BrandLogo } from "@/components/brand-logo";
 import { cn } from "@/lib/utils";
 
 export function AuthPageShell({
@@ -35,9 +36,14 @@ export function AuthPageShell({
           aria-hidden
         />
         <div className="relative space-y-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary">
-            BuyAnyAutoPart
-          </p>
+          <div className="flex items-center gap-3">
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white/90 shadow-sm ring-1 ring-primary/15">
+              <BrandLogo size={44} className="h-10 w-10" priority />
+            </span>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary">
+              BuyAnyAutoPart
+            </p>
+          </div>
           <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">{title}</h1>
           <div className="max-w-md text-sm leading-relaxed text-muted-foreground">{subtitle}</div>
           <ul className="mt-6 space-y-2 text-sm text-muted-foreground">
